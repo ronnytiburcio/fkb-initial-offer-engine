@@ -571,7 +571,11 @@
     </div>
     <div class="topbar-actions">
       <button class="btn btn-secondary" onclick="resetForm()">Reset</button>
-      <button class="btn btn-primary" onclick="exportPDF()">
+      <button class="btn btn-primary" onclick="exportPNG(this)">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        Export PNG
+      </button>
+      <button class="btn btn-primary" onclick="exportPDF(this)">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
         Export PDF
       </button>
@@ -1024,55 +1028,77 @@
       });
     }
 
+    // ── Shared canvas render for PDF/PNG export ──
+    async function renderPreviewCanvas({ rawLinkForPng = false } = {}) {
+      const paper = document.getElementById('previewPaper');
+      const financingLink = document.getElementById('financingLink');
+
+      // Temporarily remove size constraints for full capture
+      const origMaxH = paper.style.maxHeight;
+      const origMinH = paper.style.minHeight;
+      const origOverflow = paper.style.overflow;
+      paper.style.maxHeight = 'none';
+      paper.style.minHeight = '1056px';
+      paper.style.overflow = 'visible';
+
+      // For PNG: swap the styled link text for a raw URL so clients can type it
+      let origLinkText = null;
+      if (rawLinkForPng && financingLink) {
+        origLinkText = financingLink.textContent;
+        financingLink.textContent = 'Need Financing? Pre-Qualify at: acornfinance.com/pre-qualify/?d=JFBPW';
+      }
+
+      // Small delay to let browser reflow
+      await new Promise(r => setTimeout(r, 100));
+
+      const canvas = await html2canvas(paper, {
+        scale: 2,
+        allowTaint: true,
+        useCORS: false,
+        backgroundColor: '#FFFFFF',
+        logging: false
+      });
+
+      // Capture link geometry BEFORE restoring styles (layout must match the canvas)
+      let linkGeom = null;
+      if (financingLink) {
+        const paperRect = paper.getBoundingClientRect();
+        const linkRect = financingLink.getBoundingClientRect();
+        linkGeom = {
+          relLeft: linkRect.left - paperRect.left,
+          relTop: linkRect.top - paperRect.top,
+          width: linkRect.width,
+          height: linkRect.height,
+          paperWidth: paperRect.width,
+          href: financingLink.href,
+        };
+      }
+
+      // Restore original styles and link text
+      paper.style.maxHeight = origMaxH;
+      paper.style.minHeight = origMinH;
+      paper.style.overflow = origOverflow;
+      if (origLinkText !== null && financingLink) {
+        financingLink.textContent = origLinkText;
+      }
+
+      return { canvas, linkGeom };
+    }
+
+    function buildExportFilename(ext) {
+      const project = document.getElementById('projectName').value || 'Proposal';
+      const safeName = project.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
+      return 'FKB_' + safeName + '.' + ext;
+    }
+
     // ── PDF Export ──
-    async function exportPDF() {
-      const btn = document.querySelector('.btn-primary');
+    async function exportPDF(btn) {
       const originalText = btn.innerHTML;
       btn.innerHTML = 'Generating...';
       btn.disabled = true;
 
       try {
-        const paper = document.getElementById('previewPaper');
-
-        // Temporarily remove size constraints for full capture
-        const origMaxH = paper.style.maxHeight;
-        const origMinH = paper.style.minHeight;
-        const origOverflow = paper.style.overflow;
-        paper.style.maxHeight = 'none';
-        paper.style.minHeight = '1056px';
-        paper.style.overflow = 'visible';
-
-        // Small delay to let browser reflow
-        await new Promise(r => setTimeout(r, 100));
-
-        const canvas = await html2canvas(paper, {
-          scale: 2,
-          allowTaint: true,
-          useCORS: false,
-          backgroundColor: '#FFFFFF',
-          logging: false
-        });
-
-        // Capture link geometry BEFORE restoring styles (layout must match the canvas)
-        const financingLink = document.getElementById('financingLink');
-        let linkGeom = null;
-        if (financingLink) {
-          const paperRect = paper.getBoundingClientRect();
-          const linkRect = financingLink.getBoundingClientRect();
-          linkGeom = {
-            relLeft: linkRect.left - paperRect.left,
-            relTop: linkRect.top - paperRect.top,
-            width: linkRect.width,
-            height: linkRect.height,
-            paperWidth: paperRect.width,
-            href: financingLink.href,
-          };
-        }
-
-        // Restore original styles
-        paper.style.maxHeight = origMaxH;
-        paper.style.minHeight = origMinH;
-        paper.style.overflow = origOverflow;
+        const { canvas, linkGeom } = await renderPreviewCanvas();
 
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF('p', 'pt', 'letter');
@@ -1105,13 +1131,33 @@
           );
         }
 
-        // Build filename
-        const project = document.getElementById('projectName').value || 'Proposal';
-        const safeName = project.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
-        pdf.save('FKB_' + safeName + '.pdf');
+        pdf.save(buildExportFilename('pdf'));
       } catch (err) {
         console.error('PDF export failed:', err);
         alert('PDF export failed. Error: ' + err.message);
+      } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }
+    }
+
+    // ── PNG Export ──
+    async function exportPNG(btn) {
+      const originalText = btn.innerHTML;
+      btn.innerHTML = 'Generating...';
+      btn.disabled = true;
+
+      try {
+        const { canvas } = await renderPreviewCanvas({ rawLinkForPng: true });
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = buildExportFilename('png');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (err) {
+        console.error('PNG export failed:', err);
+        alert('PNG export failed. Error: ' + err.message);
       } finally {
         btn.innerHTML = originalText;
         btn.disabled = false;
