@@ -771,7 +771,7 @@
 
         <!-- Financing -->
         <div class="preview-financing">
-          <a href="https://www.acornfinance.com/pre-qualify/?d=JFBPW&utm_medium=web_pre_qual_link" target="_blank">Need Financing? Click Here to Pre-Qualify</a>
+          <a id="financingLink" href="https://www.acornfinance.com/pre-qualify/?d=JFBPW&utm_medium=web_pre_qual_link" target="_blank">Need Financing? Click Here to Pre-Qualify</a>
         </div>
 
         <!-- Footer -->
@@ -1053,6 +1053,22 @@
           logging: false
         });
 
+        // Capture link geometry BEFORE restoring styles (layout must match the canvas)
+        const financingLink = document.getElementById('financingLink');
+        let linkGeom = null;
+        if (financingLink) {
+          const paperRect = paper.getBoundingClientRect();
+          const linkRect = financingLink.getBoundingClientRect();
+          linkGeom = {
+            relLeft: linkRect.left - paperRect.left,
+            relTop: linkRect.top - paperRect.top,
+            width: linkRect.width,
+            height: linkRect.height,
+            paperWidth: paperRect.width,
+            href: financingLink.href,
+          };
+        }
+
         // Restore original styles
         paper.style.maxHeight = origMaxH;
         paper.style.minHeight = origMinH;
@@ -1076,6 +1092,18 @@
 
         const imgData = canvas.toDataURL('image/png');
         pdf.addImage(imgData, 'PNG', 0, 0, drawWidth, drawHeight);
+
+        // Overlay a clickable link annotation on top of the rasterized financing link
+        if (linkGeom) {
+          const ratio = drawWidth / linkGeom.paperWidth;
+          pdf.link(
+            linkGeom.relLeft * ratio,
+            linkGeom.relTop * ratio,
+            linkGeom.width * ratio,
+            linkGeom.height * ratio,
+            { url: linkGeom.href }
+          );
+        }
 
         // Build filename
         const project = document.getElementById('projectName').value || 'Proposal';
